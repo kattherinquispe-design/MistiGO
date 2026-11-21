@@ -718,7 +718,7 @@ private fun HowToEarnMoreBeautyCard(
                         color = SmartBusText
                     )
                     Text(
-                        text = "Sigue estos pasos y suma +20 puntos en cada viaje",
+                        text = "Sigue estos pasos y suma +5 puntos en cada viaje",
                         fontFamily = SmartBusBody,
                         fontSize = 12.sp,
                         color = SmartBusTextSecondary
@@ -730,7 +730,7 @@ private fun HowToEarnMoreBeautyCard(
 
             EarnGuideRow(
                 icon = Icons.Default.LocationOn,
-                badge = "+20 pts",
+                badge = "+5 pts",
                 title = "1. Acércate a un paradero oficial",
                 subtitle = "Cuando estés en el radio del paradero recibirás una notificación con sonido."
             )
@@ -741,7 +741,7 @@ private fun HowToEarnMoreBeautyCard(
                 icon = Icons.Default.DirectionsBus,
                 badge = "Automático",
                 title = "2. Aborda tu bus en ruta",
-                subtitle = "El GPS detecta tu viaje en el bus y acredita +20 puntos al instante en tu cuenta."
+                subtitle = "El GPS detecta tu viaje en el bus y acredita +5 puntos al instante en tu cuenta."
             )
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -979,7 +979,7 @@ private fun EmptyHistoryCard(
                 HistoryFilter.REDEEMS ->
                     "Cuando canjes una recompensa aparecerá aquí tu historial de códigos QR únicos."
                 HistoryFilter.ALL ->
-                    "Sube a un bus en un paradero para empezar a ganar +20 puntos."
+                    "Sube a un bus en un paradero para empezar a ganar +5 puntos."
             },
             style = MaterialTheme.typography.bodySmall,
             color = SmartBusTextSecondary,

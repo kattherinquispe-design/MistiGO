@@ -99,7 +99,7 @@ fun HelpScreen(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = "Ganas 50 puntos cada vez que subes a un bus " +
+                        text = "Ganas 5 puntos cada vez que subes a un bus " +
                             "en un paradero registrado. El sistema valida " +
                             "que un bus real este cerca y que te hayas " +
                             "movido, por lo que no se pueden sumar puntos " +
