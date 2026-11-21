@@ -187,8 +187,8 @@ fun SmartBusMapScreen(
     val availableRoutes = remember(routes) {
         routes.ifEmpty { RouteRepository.routes }
     }
-    var activeRoute by remember(selectedRoute, availableRoutes) {
-        mutableStateOf(selectedRoute ?: availableRoutes.firstOrNull())
+    var activeRoute by remember(selectedRoute) {
+        mutableStateOf(selectedRoute)
     }
     var activeStop by remember(selectedStop) {
         mutableStateOf(selectedStop)
@@ -218,12 +218,8 @@ fun SmartBusMapScreen(
         }
     }
 
-    // Ruta activa para dibujar en el mapa: la seleccionada o la primera disponible
-    val currentRoute = activeRoute ?: if (tripFilter == "BAJADA") {
-        availableRoutes.firstOrNull { it.bajadaPoints.isNotEmpty() }
-    } else {
-        availableRoutes.firstOrNull { it.subidaPoints.isNotEmpty() }
-    }
+    // Ruta activa para dibujar en el mapa: únicamente la seleccionada por el usuario
+    val currentRoute = activeRoute
 
     val rawPointsToShow = when (tripFilter) {
         "BAJADA" -> currentRoute?.bajadaPoints
@@ -303,8 +299,8 @@ fun SmartBusMapScreen(
 
     // Sincronizar sentido al cambiar de ruta
     LaunchedEffect(selectedRoute) {
+        activeRoute = selectedRoute
         if (selectedRoute != null) {
-            activeRoute = selectedRoute
             if (selectedRoute.tripType.equals("BAJADA", ignoreCase = true)) {
                 tripFilter = "BAJADA"
             } else if (selectedRoute.tripType.equals("SUBIDA", ignoreCase = true)) {
@@ -481,13 +477,13 @@ fun SmartBusMapScreen(
         selectedRoute != null && selectedRoute.points.isNotEmpty() ->
             LatLng(selectedRoute.points.first().latitude, selectedRoute.points.first().longitude)
         selectedStop != null -> LatLng(selectedStop.latitude, selectedStop.longitude)
-        else -> LatLng(0.0, 0.0)
+        else -> LatLng(-16.39889, -71.53500)
     }
 
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(
             initialLocation,
-            if (destination != null) 16f else 2f
+            if (destination != null || userLocation != null) 16f else 14f
         )
     }
 
@@ -688,7 +684,7 @@ fun SmartBusMapScreen(
                 isProgrammaticMove = true
                 cameraPositionState.animate(
                     CameraUpdateFactory.newCameraPosition(
-                        CameraPosition.fromLatLngZoom(LatLng(0.0, 0.0), 2f)
+                        CameraPosition.fromLatLngZoom(LatLng(-16.39889, -71.53500), 14f)
                     ),
                     400
                 )
@@ -756,7 +752,7 @@ fun SmartBusMapScreen(
     LaunchedEffect(currentRoute?.id, tripFilter, baseRelevantStops) {
         if (baseRelevantStops.isEmpty()) return@LaunchedEffect
         val enriched = withContext(Dispatchers.IO) {
-            val geocoder = runCatching { Geocoder(context, Locale("es", "PE")) }.getOrNull()
+            val geocoder = runCatching { Geocoder(context, Locale.forLanguageTag("es-PE")) }.getOrNull()
             baseRelevantStops.map { stop ->
                 if (!stop.name.startsWith("Paradero ") || !stop.name.contains("·")) {
                     stop
@@ -765,6 +761,7 @@ fun SmartBusMapScreen(
                     val cached = CustomMapMarkers.geocoderStreetCache[cacheKey]
                     val streetName = cached ?: runCatching {
                         kotlinx.coroutines.withTimeoutOrNull(1800L) {
+                            @Suppress("DEPRECATION")
                             val addr = geocoder?.getFromLocation(stop.latitude, stop.longitude, 1)?.firstOrNull()
                             val road = addr?.thoroughfare?.takeIf { it.isNotBlank() && !it.equals("Unnamed Road", ignoreCase = true) }
                             val area = addr?.subLocality ?: addr?.featureName?.takeIf { it.any { c -> c.isLetter() } }

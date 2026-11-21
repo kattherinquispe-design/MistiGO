@@ -22,9 +22,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -57,7 +59,7 @@ fun RewardsScreen(
     onTabSelected: (SmartBusTab) -> Unit = {},
     onMarkAsUsed: ((String) -> Boolean)? = null
 ) {
-    val clipboard = LocalClipboardManager.current
+    val screenContext = LocalContext.current
     var selectedRewardForRedeem by remember { mutableStateOf<Reward?>(null) }
     var lastClickedReward by remember { mutableStateOf<Reward?>(null) }
     var activeVoucherReward by remember { mutableStateOf<Pair<Reward, String>?>(null) }
@@ -232,7 +234,14 @@ fun RewardsScreen(
                                     .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
                                     .background(Color(0xFFE2E8F0))
                             ) {
-                                if (reward.imageUrl.isNotBlank()) {
+                                if (reward.imageResId != null) {
+                                    Image(
+                                        painter = painterResource(id = reward.imageResId),
+                                        contentDescription = reward.name,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else if (reward.imageUrl.isNotBlank()) {
                                     val context = LocalContext.current
                                     val imageRequest = remember(reward.imageUrl) {
                                         ImageRequest.Builder(context)
@@ -507,7 +516,8 @@ fun RewardsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                clipboard.setText(AnnotatedString(code))
+                                val cm = screenContext.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                cm?.setPrimaryClip(ClipData.newPlainText("Código MistiGo", code))
                             }
                     ) {
                         Column(

@@ -15,10 +15,10 @@ class StatisticsRepository(
         val history =
             pointsRepository.getHistory()
 
-        // Solo contar transacciones que explícitamente sean abordajes validados
+        // Solo contar transacciones positivas que explícitamente sean abordajes validados
         val historyBoardings =
             history.count {
-                it.reason.contains("Abordaje", ignoreCase = true)
+                it.points > 0 && it.reason.contains("Abordaje", ignoreCase = true)
             }
 
         val boardingCount = historyBoardings
@@ -38,7 +38,7 @@ class StatisticsRepository(
         val historyStopKeys =
             history
                 .filter {
-                    it.reason.contains("Abordaje", ignoreCase = true)
+                    it.points > 0 && it.reason.contains("Abordaje", ignoreCase = true)
                 }
                 .mapNotNull { tx ->
                     when {

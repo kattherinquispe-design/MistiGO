@@ -1,5 +1,6 @@
 package com.ejemplo.smartbus.data
 
+import com.ejemplo.smartbus.R
 import com.ejemplo.smartbus.data.model.Reward
 
 /**
@@ -26,7 +27,8 @@ object RewardsCatalog {
             stock = 40,
             category = "cafeteria",
             isAvailable = true,
-            imageUrl = "https://images.unsplash.com/photo-1608897013039-887f21d8c804?auto=format&fit=crop&w=600&q=80"
+            imageUrl = "https://images.unsplash.com/photo-1608897013039-887f21d8c804?auto=format&fit=crop&w=600&q=80",
+            imageResId = R.drawable.reward_empanada
         ),
         Reward(
             id = 3,

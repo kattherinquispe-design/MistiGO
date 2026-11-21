@@ -104,11 +104,27 @@ class PointsRepository(context: Context) {
             if (docIds.isEmpty()) return
 
             val now = System.currentTimeMillis()
+            val prefs = syncActivePrefs()
+            val historyJson = prefs.getString(KEY_HISTORY, null)
+            val redeemedJson = prefs.getString(KEY_REDEEMED, null)
+            val boardingCount = getHistory().count {
+                it.points > 0 && it.reason.contains("Abordaje", ignoreCase = true)
+            }
+            val redeemedCount = getRedeemedRewards().size
+
             val data = hashMapOf<String, Any>(
                 "puntos" to totalPoints,
                 "points" to totalPoints,
+                "abordajes" to boardingCount,
+                "canjes" to redeemedCount,
                 "updatedAt" to now
             )
+            if (!historyJson.isNullOrBlank()) {
+                data["historyJson"] = historyJson
+            }
+            if (!redeemedJson.isNullOrBlank()) {
+                data["redeemedJson"] = redeemedJson
+            }
             if (email.isNotBlank()) {
                 data["correo"] = email
                 data["email"] = email
@@ -126,8 +142,16 @@ class PointsRepository(context: Context) {
                     val atomicUpdate = hashMapOf<String, Any>(
                         "puntos" to com.google.firebase.firestore.FieldValue.increment(deltaPoints.toLong()),
                         "points" to com.google.firebase.firestore.FieldValue.increment(deltaPoints.toLong()),
+                        "abordajes" to boardingCount,
+                        "canjes" to redeemedCount,
                         "updatedAt" to now
                     )
+                    if (!historyJson.isNullOrBlank()) {
+                        atomicUpdate["historyJson"] = historyJson
+                    }
+                    if (!redeemedJson.isNullOrBlank()) {
+                        atomicUpdate["redeemedJson"] = redeemedJson
+                    }
                     ref.update(atomicUpdate).addOnFailureListener {
                         ref.set(data, SetOptions.merge())
                     }
@@ -153,9 +177,22 @@ class PointsRepository(context: Context) {
             val db = FirebaseFirestore.getInstance()
             val primaryId = docIds.firstOrNull()
 
-            fun applyCloudScore(cloudPoints: Int) {
+            fun applyCloudScore(
+                cloudPoints: Int,
+                cloudHistoryJson: String? = null,
+                cloudRedeemedJson: String? = null
+            ) {
                 val prefs = syncActivePrefs()
-                prefs.edit().putInt(KEY_POINTS, cloudPoints).commit()
+                val editor = prefs.edit().putInt(KEY_POINTS, cloudPoints)
+                val localHistory = prefs.getString(KEY_HISTORY, null)
+                if ((localHistory.isNullOrBlank() || localHistory == "[]") && !cloudHistoryJson.isNullOrBlank()) {
+                    editor.putString(KEY_HISTORY, cloudHistoryJson)
+                }
+                val localRedeemed = prefs.getString(KEY_REDEEMED, null)
+                if ((localRedeemed.isNullOrBlank() || localRedeemed == "{}") && !cloudRedeemedJson.isNullOrBlank()) {
+                    editor.putString(KEY_REDEEMED, cloudRedeemedJson)
+                }
+                editor.commit()
                 PointsEventManager.notifyPointsAdded(cloudPoints)
                 onSynced?.invoke(cloudPoints)
             }
@@ -170,7 +207,11 @@ class PointsRepository(context: Context) {
                         val doc = snap.documents.firstOrNull()
                         val pts = (doc?.getLong("puntos") ?: doc?.getLong("points"))?.toInt()
                         if (pts != null) {
-                            applyCloudScore(pts)
+                            applyCloudScore(
+                                cloudPoints = pts,
+                                cloudHistoryJson = doc?.getString("historyJson"),
+                                cloudRedeemedJson = doc?.getString("redeemedJson")
+                            )
                         }
                     }
             }
@@ -188,7 +229,11 @@ class PointsRepository(context: Context) {
                             (doc.getLong("puntos") ?: doc.getLong("points"))?.toInt()
                         } else null
                         if (pts != null) {
-                            applyCloudScore(pts)
+                            applyCloudScore(
+                                cloudPoints = pts,
+                                cloudHistoryJson = doc?.getString("historyJson"),
+                                cloudRedeemedJson = doc?.getString("redeemedJson")
+                            )
                         } else {
                             checkSecondaryDoc(index + 1)
                         }
@@ -509,6 +554,7 @@ class PointsRepository(context: Context) {
             code = code
         )
         val remaining = getPoints()
+        syncPointsToFirestore(remaining, deltaPoints = 0)
         PointsEventManager.notifyPointsAdded(remaining)
 
         try {

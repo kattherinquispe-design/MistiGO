@@ -8,5 +8,6 @@ data class Reward(
     val stock: Int = 0,
     val category: String = "general",
     val isAvailable: Boolean = true,
-    val imageUrl: String = ""
+    val imageUrl: String = "",
+    val imageResId: Int? = null
 )

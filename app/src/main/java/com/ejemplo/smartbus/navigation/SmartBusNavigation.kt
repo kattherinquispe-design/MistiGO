@@ -1,8 +1,13 @@
 package com.ejemplo.smartbus.navigation
 
 import android.Manifest
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -195,6 +200,7 @@ fun SmartBusNavigation() {
         ) {
             trackingStartedManually = true
             TrackingManager(context).startTracking()
+            requestPassengerBatteryOptimizationOnce(context)
         }
 
     val locationPermissionLauncher =
@@ -269,6 +275,8 @@ fun SmartBusNavigation() {
                 passengerBackgroundLocationLauncher.launch(
                     Manifest.permission.ACCESS_BACKGROUND_LOCATION
                 )
+            } else {
+                requestPassengerBatteryOptimizationOnce(context)
             }
         }
     }
@@ -990,7 +998,7 @@ private fun ProfileTab(
         onSignInClick = onSignInClick,
         onSignOutClick = onSignOutClick,
         onBecomeDriverClick = onBecomeDriverClick,
-        statistics = remember(pointsRepository, points) {
+        statistics = remember(pointsRepository, points, session?.storageKey) {
             StatisticsRepository(pointsRepository).getStatistics()
         },
         onBack = { onTabChange(SmartBusTab.HOME) },
@@ -1001,4 +1009,28 @@ private fun ProfileTab(
         onAchievementsClick = onAchievementsClick,
         onTabSelected = onTabChange
     )
+}
+
+/**
+ * Solicita una sola vez al sistema excluir a MistiGo del ahorro de batería
+ * para que el seguimiento de abordajes en segundo plano no sea pausado
+ * con la pantalla apagada.
+ */
+private fun requestPassengerBatteryOptimizationOnce(context: Context) {
+    val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+    if (powerManager.isIgnoringBatteryOptimizations(context.packageName)) return
+
+    val prefs = context.getSharedPreferences("smartbus_permission", Context.MODE_PRIVATE)
+    if (prefs.getBoolean("asked_battery_optimization", false)) return
+    prefs.edit().putBoolean("asked_battery_optimization", true).apply()
+
+    runCatching {
+        val intent = Intent(
+            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.parse("package:${context.packageName}")
+        ).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    }
 }
