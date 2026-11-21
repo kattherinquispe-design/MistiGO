@@ -137,8 +137,64 @@ object FirebaseRouteRepository {
         }
     }
 
+    // Límites geográficos estrictos de Arequipa Metropolitana (evita rutas de otros países o ciudades)
+    private const val AREQUIPA_MIN_LAT = -16.65
+    private const val AREQUIPA_MAX_LAT = -16.15
+    private const val AREQUIPA_MIN_LNG = -71.85
+    private const val AREQUIPA_MAX_LNG = -71.30
+
+    fun isPointInArequipa(lat: Double, lng: Double): Boolean {
+        return !lat.isNaN() && !lng.isNaN() &&
+            lat in AREQUIPA_MIN_LAT..AREQUIPA_MAX_LAT &&
+            lng in AREQUIPA_MIN_LNG..AREQUIPA_MAX_LNG
+    }
+
+    private data class ArequipaSector(
+        val name: String,
+        val lat: Double,
+        val lng: Double
+    )
+
+    private val arequipaSectors2026 = listOf(
+        ArequipaSector("Centro Histórico (Cercado)", -16.3989, -71.5369),
+        ArequipaSector("Av. Goyeneche / UNSA", -16.4025, -71.5265),
+        ArequipaSector("Terminal / Av. Avelino Cáceres", -16.4255, -71.5375),
+        ArequipaSector("Mall Porongoche / Lambramani", -16.4165, -71.5190),
+        ArequipaSector("Paucarpata (Plaza / Ciudad Blanca)", -16.4210, -71.5030),
+        ArequipaSector("Miguel Grau (Paucarpata)", -16.4045, -71.4780),
+        ArequipaSector("Mariano Melgar (Av. Lima)", -16.4020, -71.5035),
+        ArequipaSector("Miraflores (Plaza Mayta Cápac)", -16.3910, -71.5180),
+        ArequipaSector("Alto Selva Alegre", -16.3775, -71.5250),
+        ArequipaSector("Yanahuara / Av. Ejército", -16.3920, -71.5490),
+        ArequipaSector("Cayma (Plaza / Bolognesi)", -16.3650, -71.5470),
+        ArequipaSector("Cerro Colorado (Las Américas)", -16.3760, -71.5610),
+        ArequipaSector("Zamácola / Av. Aviación", -16.3520, -71.5680),
+        ArequipaSector("Cono Norte / Yura (Cerro Colorado)", -16.3150, -71.5850),
+        ArequipaSector("Sachaca (Av. Fernandini)", -16.4180, -71.5640),
+        ArequipaSector("Tiabaya (Pampas Nuevas)", -16.4495, -71.5950),
+        ArequipaSector("Hunter (Av. Viña del Mar)", -16.4450, -71.5580),
+        ArequipaSector("Socabaya (Av. Salaverry / Lara)", -16.4520, -71.5270),
+        ArequipaSector("Characato / Sabandía", -16.4580, -71.4880),
+        ArequipaSector("Uchumayo / Congata", -16.4380, -71.6250)
+    )
+
+    private fun resolveArequipaSectorName(point: GeoPoint): String {
+        val dist = FloatArray(1)
+        var bestName = "Arequipa Cercado"
+        var bestDist = Float.MAX_VALUE
+        for (sector in arequipaSectors2026) {
+            Location.distanceBetween(point.latitude, point.longitude, sector.lat, sector.lng, dist)
+            if (dist[0] < bestDist) {
+                bestDist = dist[0]
+                bestName = sector.name
+            }
+        }
+        return bestName
+    }
+
     /**
      * Parsea la cadena JSON de coordenadas en formato [[lng, lat, alt], ...]
+     * filtrando estrictamente que todos los puntos pertenezcan a Arequipa.
      */
     fun parseCoordinates(rawJson: String?): List<GeoPoint> {
         if (rawJson.isNullOrBlank()) return emptyList()
@@ -149,7 +205,7 @@ object FirebaseRouteRepository {
                 val pointArray = jsonArray.optJSONArray(i) ?: continue
                 val lng = pointArray.optDouble(0)
                 val lat = pointArray.optDouble(1)
-                if (!lat.isNaN() && !lng.isNaN() && (lat != 0.0 || lng != 0.0)) {
+                if (isPointInArequipa(lat, lng)) {
                     points.add(GeoPoint(latitude = lat, longitude = lng))
                 }
             }
@@ -177,6 +233,7 @@ object FirebaseRouteRepository {
             val coordStr = doc.getString("coordenadas")
             val points = parseCoordinates(coordStr)
 
+            // Solo aceptar rutas con coordenadas válidas dentro de Arequipa
             if (points.size < 2) continue
 
             val isBajada = rawName.contains("vuelta", ignoreCase = true) ||
@@ -197,39 +254,43 @@ object FirebaseRouteRepository {
             )
         }
 
-        // Agrupamos por nombre base limpio de la ruta
-        val groups = rawDocs.groupBy { cleanRouteBase(it.rawName, it.description) }
+        // Agrupamos por nombre base limpio o por sector real de Arequipa si el documento solo decía "IDA"/"VUELTA"
+        val groups = rawDocs.groupBy { doc ->
+            val base = cleanRouteBase(doc.rawName, doc.description)
+            if (base.isBlank() || base.equals("Ruta Urbana", ignoreCase = true)) {
+                val firstPt = if (!doc.isBajada) doc.points.first() else doc.points.last()
+                val lastPt = if (!doc.isBajada) doc.points.last() else doc.points.first()
+                val origSector = resolveArequipaSectorName(firstPt)
+                val destSector = resolveArequipaSectorName(lastPt)
+                if (origSector == destSector) {
+                    val midSector = resolveArequipaSectorName(doc.points[doc.points.size / 2])
+                    "SIT $origSector - $midSector"
+                } else {
+                    "SIT $origSector - $destSector"
+                }
+            } else {
+                base
+            }
+        }
         val consolidated = mutableListOf<BusRoute>()
 
+        // 1. Incluir todas las rutas oficiales actualizadas SIT Arequipa 2026
+        RouteRepository.routes.forEach { sitRoute ->
+            val validPoints = sitRoute.points.filter { isPointInArequipa(it.latitude, it.longitude) }
+            if (validPoints.size >= 2) {
+                consolidated.add(
+                    sitRoute.copy(
+                        points = validPoints,
+                        subidaPoints = sitRoute.subidaPoints.ifEmpty { validPoints },
+                        bajadaPoints = sitRoute.bajadaPoints.ifEmpty { validPoints.reversed() }
+                    )
+                )
+            }
+        }
+
+        // 2. Procesar y agregar las rutas reales de Arequipa
         var index = 1
         for ((baseName, docs) in groups) {
-            if (baseName.isBlank() || baseName.equals("Ruta Urbana", ignoreCase = true) && docs.size > 2) {
-                // Si es un documento genérico sin nombre específico, generamos rutas con sus descripciones
-                for (doc in docs) {
-                    val (orig, dest) = extractOriginDestination(doc.rawName, doc.description)
-                    val code = "R-${index}"
-                    val subida = if (!doc.isBajada) doc.points else doc.points.reversed()
-                    val bajada = if (doc.isBajada) doc.points else doc.points.reversed()
-                    consolidated.add(
-                        BusRoute(
-                            id = Math.abs(doc.docId.hashCode()),
-                            code = code,
-                            name = "$orig - $dest",
-                            origin = orig,
-                            destination = dest,
-                            points = subida,
-                            subidaPoints = subida,
-                            bajadaPoints = bajada,
-                            frequencyMinutes = 10,
-                            isActive = true,
-                            tripType = if (doc.isBajada) "BAJADA" else "SUBIDA"
-                        )
-                    )
-                    index++
-                }
-                continue
-            }
-
             // Seleccionar los mejores trazados para Subida y Bajada
             val subidaDocs = docs.filter { !it.isBajada }.sortedByDescending { it.points.size }
             val bajadaDocs = docs.filter { it.isBajada }.sortedByDescending { it.points.size }
@@ -240,16 +301,47 @@ object FirebaseRouteRepository {
             val finalSubida = bestSubidaPoints.ifEmpty { bestBajadaPoints.reversed() }
             val finalBajada = bestBajadaPoints.ifEmpty { bestSubidaPoints.reversed() }
 
+            if (finalSubida.size < 2) continue
+
             val representativeDoc = docs.first()
-            val (origin, destination) = extractOriginDestination(representativeDoc.rawName, representativeDoc.description)
+            val (rawOrigin, rawDestination) = extractOriginDestination(representativeDoc.rawName, representativeDoc.description)
+            val origin = if (isValidSector(rawOrigin)) rawOrigin else resolveArequipaSectorName(finalSubida.first())
+            var destination = if (isValidSector(rawDestination)) rawDestination else resolveArequipaSectorName(finalSubida.last())
+
+            if (origin == destination && finalSubida.size >= 3) {
+                val start = finalSubida.first()
+                val dist = FloatArray(1)
+                val farthest = finalSubida.maxByOrNull { pt ->
+                    Location.distanceBetween(start.latitude, start.longitude, pt.latitude, pt.longitude, dist)
+                    dist[0]
+                }
+                if (farthest != null) {
+                    val resolvedFar = resolveArequipaSectorName(farthest)
+                    if (resolvedFar != origin) {
+                        destination = resolvedFar
+                    }
+                }
+            }
             val code = extractRouteCode(baseName, index)
+
+            val cleanBase = baseName.replace("(?i)\\s*\\(?\\s*(ida|vuelta|retorno|subida|bajada)\\s*\\)?\\s*".toRegex(), "").trim()
+
+            // Asignar nombres claros y descriptivos con lugares importantes para que el pasajero identifique a dónde va
+            val descriptiveName = when {
+                cleanBase.contains(" - ") || cleanBase.contains(" → ") || cleanBase.contains(" a ") -> cleanBase
+                origin.isNotBlank() && destination.isNotBlank() && origin != destination ->
+                    "$cleanBase: $origin → $destination"
+                origin.isNotBlank() ->
+                    "$cleanBase: $origin"
+                else -> cleanBase
+            }
 
             val routeId = Math.abs(baseName.hashCode())
             consolidated.add(
                 BusRoute(
-                    id = if (routeId != 0) routeId else index,
+                    id = if (routeId != 0) routeId else (1000 + index),
                     code = code,
-                    name = baseName,
+                    name = descriptiveName,
                     origin = origin,
                     destination = destination,
                     points = finalSubida,
@@ -263,7 +355,7 @@ object FirebaseRouteRepository {
             index++
         }
 
-        return consolidated.sortedBy { it.code }
+        return consolidated.distinctBy { it.id }.sortedBy { it.code }
     }
 
     private fun cleanRouteBase(rawName: String, desc: String): String {
@@ -303,22 +395,51 @@ object FirebaseRouteRepository {
         return "R$fallbackIndex"
     }
 
+    private fun isValidSector(name: String): Boolean {
+        val clean = name.trim().lowercase()
+        if (clean.isBlank() || clean.length < 3) return false
+        if (clean == "ida" || clean == "vuelta" || clean == "retorno" || clean == "subida" || clean == "bajada") return false
+        if (clean == "terminal origen" || clean == "terminal destino") return false
+        if (clean.startsWith("ruta ") || clean.startsWith("ruta-") || clean.matches("^r\\d+.*".toRegex())) return false
+        return true
+    }
+
     private fun extractOriginDestination(rawName: String, desc: String): Pair<String, String> {
-        if (desc.isNotBlank()) {
-            val desdeHasta = desc.replace("(?i)desde:".toRegex(), "").split("(?i)hasta:".toRegex())
+        val cleanDesc = desc
+            .replace("(?i)empresa\\s+.*".toRegex(), "")
+            .replace("(?i)corporacion\\s+.*".toRegex(), "")
+            .trim()
+
+        if (cleanDesc.isNotBlank()) {
+            val desdeHasta = cleanDesc.replace("(?i)desde:".toRegex(), "").split("(?i)hasta:".toRegex())
             if (desdeHasta.size >= 2) {
                 val orig = desdeHasta[0].trim().replace("\n", " ").take(30)
                 val dest = desdeHasta[1].trim().replace("\n", " ").take(30)
-                return Pair(orig, dest)
+                if (isValidSector(orig) && isValidSector(dest)) {
+                    return Pair(orig, dest)
+                }
             }
-            val dashSplit = desc.split("-")
+            val dashSplit = cleanDesc.split("-")
             if (dashSplit.size >= 2) {
-                return Pair(dashSplit[0].trim().take(30), dashSplit[1].trim().take(30))
+                val orig = dashSplit[0].trim().replace("\n", " ").take(30)
+                val dest = dashSplit[1].trim().replace("\n", " ").take(30)
+                if (isValidSector(orig) && isValidSector(dest)) {
+                    return Pair(orig, dest)
+                }
             }
         }
-        val nameSplit = rawName.split("-")
+        val cleanRaw = rawName
+            .replace("(?i)\\s*\\(?\\s*(ida|vuelta|retorno|subida|bajada)\\s*\\)?\\s*".toRegex(), " ")
+            .replace("(?i)empresa\\s+.*".toRegex(), "")
+            .replace("(?i)translampa.*".toRegex(), "")
+            .trim()
+        val nameSplit = cleanRaw.split("-")
         if (nameSplit.size >= 2) {
-            return Pair(nameSplit[0].trim().take(30), nameSplit[1].trim().take(30))
+            val orig = nameSplit[0].trim().take(30)
+            val dest = nameSplit[1].trim().take(30)
+            if (isValidSector(orig) && isValidSector(dest)) {
+                return Pair(orig, dest)
+            }
         }
         return Pair("Terminal Origen", "Terminal Destino")
     }

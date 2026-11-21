@@ -166,22 +166,41 @@ fun DestinationSearchScreen(
             // 1. Buscar en Firebase Firestore colección "rutas"
             val matchedFirebaseRoutes = FirebaseRouteRepository.searchRoutes(text)
 
-            // 2. Buscar en Geocoder de Google Maps
+            // 2. Buscar en Geocoder de Google Maps restringido estrictamente a Arequipa, Perú
             val geocodeList = mutableListOf<GeocodeResult>()
             try {
-                val geocoder = Geocoder(context, Locale.getDefault())
-                val addresses = geocoder.getFromLocationName(text, 8)
+                val geocoder = Geocoder(context, Locale("es", "PE"))
+                val arequipaMinLat = -16.65
+                val arequipaMaxLat = -16.15
+                val arequipaMinLng = -71.85
+                val arequipaMaxLng = -71.30
+                val queryWithCity = if (text.contains("arequipa", ignoreCase = true)) {
+                    "$text, Perú"
+                } else {
+                    "$text, Arequipa, Perú"
+                }
+                val addresses = geocoder.getFromLocationName(
+                    queryWithCity,
+                    10,
+                    arequipaMinLat,
+                    arequipaMinLng,
+                    arequipaMaxLat,
+                    arequipaMaxLng
+                )
                 addresses?.forEach { addr ->
                     val lat = addr.latitude
                     val lon = addr.longitude
-                    if (lat != 0.0 && lon != 0.0) {
+                    val countryCode = addr.countryCode.orEmpty()
+                    val isInsideArequipa = lat in arequipaMinLat..arequipaMaxLat &&
+                        lon in arequipaMinLng..arequipaMaxLng &&
+                        (countryCode.isBlank() || countryCode.equals("PE", ignoreCase = true))
+                    if (lat != 0.0 && lon != 0.0 && isInsideArequipa) {
                         val title = usableName(
                             listOfNotNull(
                                 addr.featureName,
                                 addr.thoroughfare,
-                                addr.locality,
-                                addr.subAdminArea,
-                                addr.adminArea
+                                addr.subLocality,
+                                addr.locality
                             ),
                             text
                         )
@@ -189,17 +208,19 @@ fun DestinationSearchScreen(
                             val parts = listOfNotNull(
                                 addr.thoroughfare,
                                 addr.subThoroughfare,
-                                addr.locality,
-                                addr.adminArea,
-                                addr.countryName
-                            )
+                                addr.subLocality,
+                                addr.locality ?: "Arequipa"
+                            ).distinct()
                             append(parts.joinToString(", "))
-                            if (isEmpty()) append("$lat, $lon")
+                            if (!contains("Arequipa", ignoreCase = true)) {
+                                if (isNotEmpty()) append(", ")
+                                append("Arequipa")
+                            }
                         }
                         geocodeList.add(
                             GeocodeResult(
                                 name = title,
-                                address = fullAddress.ifBlank { "$lat,$lon" },
+                                address = fullAddress.ifBlank { "Arequipa ($lat, $lon)" },
                                 location = LatLng(lat, lon)
                             )
                         )
@@ -333,7 +354,7 @@ fun DestinationSearchScreen(
                                     .background(SmartBusBlue)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Buscando en Firebase y mapa...", fontSize = 13.sp, color = Color(0xFF64748B))
+                            Text("Buscando rutas de Arequipa...", fontSize = 13.sp, color = Color(0xFF64748B))
                         }
                     }
                 }
@@ -407,7 +428,7 @@ fun DestinationSearchScreen(
                             modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
                         ) {
                             Text(
-                                text = if (query.isBlank()) "Rutas de Bus disponibles (Firebase)" else "Rutas encontradas en Firebase (${routeResults.size})",
+                                text = if (query.isBlank()) "Rutas de Arequipa disponibles" else "Rutas de Arequipa encontradas (${routeResults.size})",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = SmartBusBlue

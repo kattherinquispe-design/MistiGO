@@ -26,7 +26,7 @@ object RewardsCatalog {
             stock = 40,
             category = "cafeteria",
             isAvailable = true,
-            imageUrl = "https://upload.wikimedia.org/wikipedia/commons/6/60/Empanada_chiclayana.jpg"
+            imageUrl = "https://images.unsplash.com/photo-1608897013039-887f21d8c804?auto=format&fit=crop&w=600&q=80"
         ),
         Reward(
             id = 3,
@@ -56,7 +56,7 @@ object RewardsCatalog {
             stock = 40,
             category = "cafeteria",
             isAvailable = true,
-            imageUrl = "https://images.unsplash.com/photo-1600271886742-f049cd451bba?auto=format&fit=crop&w=600&q=80"
+            imageUrl = "https://images.unsplash.com/photo-1613478223719-2ab802602423?auto=format&fit=crop&w=600&q=80"
         ),
         Reward(
             id = 6,

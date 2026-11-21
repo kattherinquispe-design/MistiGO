@@ -225,7 +225,7 @@ fun SmartBusMapScreen(
         availableRoutes.firstOrNull { it.subidaPoints.isNotEmpty() }
     }
 
-    val pointsToShow = when (tripFilter) {
+    val rawPointsToShow = when (tripFilter) {
         "BAJADA" -> currentRoute?.bajadaPoints
             ?.ifEmpty { currentRoute.points }
             ?.ifEmpty { currentRoute.subidaPoints }
@@ -236,6 +236,20 @@ fun SmartBusMapScreen(
             ?.ifEmpty { currentRoute.subidaPoints }
             ?.ifEmpty { currentRoute.bajadaPoints }
     } ?: emptyList()
+
+    var snappedRoutePoints by remember(currentRoute?.id, tripFilter, rawPointsToShow.size) {
+        mutableStateOf(rawPointsToShow)
+    }
+    LaunchedEffect(currentRoute?.id, tripFilter, rawPointsToShow) {
+        if (rawPointsToShow.size in 2..24) {
+            snappedRoutePoints = withContext(Dispatchers.IO) {
+                CustomMapMarkers.snapRouteToRealStreets(rawPointsToShow)
+            }
+        } else {
+            snappedRoutePoints = rawPointsToShow
+        }
+    }
+    val pointsToShow = snappedRoutePoints
 
     // Al escoger una ruta (y mientras el bus activo de esa ruta se acerca), notificar al pasajero
     // el tiempo y distancia del bus activo más cercano, aviso de 5 minutos y emergencia de 3 minutos.
@@ -831,6 +845,15 @@ fun SmartBusMapScreen(
             return@LaunchedEffect
         }
         val to = LatLng(stop.latitude, stop.longitude)
+        // 1. Inmediato (0 ms): mostrar de inmediato el trazado vial y distancia para fluidez total en cualquier celular
+        if (walkingPathPoints.isEmpty()) {
+            val instant = CustomMapMarkers.buildStreetGridFallback(from, to, pointsToShow)
+            walkingPathPoints = instant.first
+            if (realWalkingDistance == null && instant.second > 0f) {
+                realWalkingDistance = instant.second
+            }
+        }
+        // 2. Refinamiento en segundo plano sin bloquear jamás la interfaz
         val routeResult = withContext(Dispatchers.IO) {
             CustomMapMarkers.fetchRealStreetWalkingRoute(
                 context = context,
@@ -839,9 +862,11 @@ fun SmartBusMapScreen(
                 routePoints = pointsToShow
             )
         }
-        walkingPathPoints = routeResult.first
-        if (routeResult.second > 0f) {
-            realWalkingDistance = routeResult.second
+        if (routeResult.first.size >= 2) {
+            walkingPathPoints = routeResult.first
+            if (routeResult.second > 0f) {
+                realWalkingDistance = routeResult.second
+            }
         }
     }
 
@@ -930,6 +955,16 @@ fun SmartBusMapScreen(
                     icon = if (isSelectedStop) stopFlagSelectedIcon else stopFlagNormalIcon,
                     onClick = {
                         activeStop = stop
+                        val from = walkingOrigin
+                        if (from != null) {
+                            val instant = CustomMapMarkers.buildStreetGridFallback(
+                                from = from,
+                                to = LatLng(stop.latitude, stop.longitude),
+                                routePoints = pointsToShow
+                            )
+                            walkingPathPoints = instant.first
+                            realWalkingDistance = instant.second
+                        }
                         onStopClick(stop)
                         false
                     }
@@ -1556,14 +1591,40 @@ internal object CustomMapMarkers {
 
     val geocoderStreetCache = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val walkingRouteCache = java.util.concurrent.ConcurrentHashMap<String, Pair<List<LatLng>, Float>>()
+    private val snappedCorridorCache = java.util.concurrent.ConcurrentHashMap<String, List<GeoPoint>>()
+
+    /**
+     * Si una ruta tiene pocos puntos de referencia (< 25), los ajusta automáticamente a las pistas
+     * y avenidas reales de Arequipa para que jamás pase por encima de las casas.
+     */
+    fun snapRouteToRealStreets(waypoints: List<GeoPoint>): List<GeoPoint> {
+        if (waypoints.size < 2 || waypoints.size >= 25) return waypoints
+        val key = waypoints.joinToString(";") { "${(it.longitude * 10000).toInt()},${(it.latitude * 10000).toInt()}" }
+        snappedCorridorCache[key]?.let { return it }
+
+        val coordsParam = waypoints.joinToString(";") { "${it.longitude},${it.latitude}" }
+        val urls = listOf(
+            "https://routing.openstreetmap.de/routed-car/route/v1/driving/$coordsParam?overview=full&geometries=geojson",
+            "https://router.project-osrm.org/route/v1/driving/$coordsParam?overview=full&geometries=geojson"
+        )
+        for (u in urls) {
+            val res = requestOsrmWalking(u)
+            if (res != null && res.first.size >= waypoints.size) {
+                val snapped = res.first.map { GeoPoint(latitude = it.latitude, longitude = it.longitude) }
+                snappedCorridorCache[key] = snapped
+                return snapped
+            }
+        }
+        return waypoints
+    }
 
     /**
      * Obtiene el camino real calle por calle (como Google Maps) desde la ubicación del usuario
      * hasta el paradero seleccionado:
      * 1. Intenta Google Maps Directions API (mode=walking) con la API Key del proyecto.
      * 2. Si la clave no tiene Directions API habilitada en Google Cloud, consulta el motor de
-     *    ruteo vial/peatonal real de calles (OSRM / OpenStreetMap Foot Router) que devuelve
-     *    cada esquina, cuadra y avenida real de la ciudad.
+     *    ruteo vial/peatonal real de calles (OSRM / OpenStreetMap Foot & Street Router en formato GeoJSON)
+     *    que devuelve cada esquina, cuadra y avenida real de Arequipa.
      * 3. Si el teléfono está sin internet, sigue el corredor vial más cercano de la ruta.
      */
     fun fetchRealStreetWalkingRoute(
@@ -1593,10 +1654,11 @@ internal object CustomMapMarkers {
             }
         }
 
-        // 2. Motor de ruteo peatonal real por calles (OpenStreetMap / OSRM Foot & Street Router)
+        // 2. Motor de ruteo peatonal real por calles (OpenStreetMap / OSRM GeoJSON & Polyline)
         val osrmUrls = listOf(
-            "https://routing.openstreetmap.de/routed-foot/route/v1/driving/${from.longitude},${from.latitude};${to.longitude},${to.latitude}?overview=full&geometries=polyline&steps=true",
-            "https://router.project-osrm.org/route/v1/foot/${from.longitude},${from.latitude};${to.longitude},${to.latitude}?overview=full&geometries=polyline&steps=true"
+            "https://routing.openstreetmap.de/routed-foot/route/v1/driving/${from.longitude},${from.latitude};${to.longitude},${to.latitude}?overview=full&geometries=geojson",
+            "https://router.project-osrm.org/route/v1/foot/${from.longitude},${from.latitude};${to.longitude},${to.latitude}?overview=full&geometries=geojson",
+            "https://routing.openstreetmap.de/routed-car/route/v1/driving/${from.longitude},${from.latitude};${to.longitude},${to.latitude}?overview=full&geometries=geojson"
         )
         for (urlStr in osrmUrls) {
             val osrmResult = requestOsrmWalking(urlStr)
@@ -1624,8 +1686,8 @@ internal object CustomMapMarkers {
                     "&mode=walking&key=$apiKey"
             )
             val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
-                connectTimeout = 3500
-                readTimeout = 3500
+                connectTimeout = 1500
+                readTimeout = 1500
                 requestMethod = "GET"
             }
             if (conn.responseCode != 200) return null
@@ -1672,8 +1734,8 @@ internal object CustomMapMarkers {
     private fun requestOsrmWalking(urlStr: String): Pair<List<LatLng>, Float>? {
         return try {
             val conn = (java.net.URL(urlStr).openConnection() as java.net.HttpURLConnection).apply {
-                connectTimeout = 3500
-                readTimeout = 3500
+                connectTimeout = 2000
+                readTimeout = 2000
                 requestMethod = "GET"
                 setRequestProperty("User-Agent", "MistiGo-Android/1.0")
             }
@@ -1684,6 +1746,25 @@ internal object CustomMapMarkers {
             if (routes.length() == 0) return null
             val routeObj = routes.getJSONObject(0)
             val dist = routeObj.optDouble("distance", 0.0).toFloat()
+
+            // Soporta tanto geometries=geojson (LineString exacto de coordenadas) como geometries=polyline
+            val geomObj = routeObj.optJSONObject("geometry")
+            if (geomObj != null) {
+                val coords = geomObj.optJSONArray("coordinates")
+                if (coords != null && coords.length() >= 2) {
+                    val pts = ArrayList<LatLng>(coords.length())
+                    for (i in 0 until coords.length()) {
+                        val pair = coords.optJSONArray(i) ?: continue
+                        val lng = pair.optDouble(0)
+                        val lat = pair.optDouble(1)
+                        if (!lat.isNaN() && !lng.isNaN()) {
+                            pts.add(LatLng(lat, lng))
+                        }
+                    }
+                    if (pts.size >= 2) return pts to dist
+                }
+            }
+
             val geometry = routeObj.optString("geometry").orEmpty()
             if (geometry.isBlank()) return null
             val decoded = decodePolyline(geometry)
@@ -1731,7 +1812,7 @@ internal object CustomMapMarkers {
         return poly
     }
 
-    private fun buildStreetGridFallback(
+    fun buildStreetGridFallback(
         from: LatLng,
         to: LatLng,
         routePoints: List<GeoPoint>

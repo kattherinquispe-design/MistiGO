@@ -723,8 +723,19 @@ fun HomeScreen(
                             }
 
                             Column(modifier = Modifier.weight(1f)) {
+                                val displayOrigin = if (freq.origin.isBlank() || freq.origin.equals("VUELTA", ignoreCase = true) || freq.origin.equals("IDA", ignoreCase = true)) {
+                                    matchedRoute?.origin ?: "Paucarpata (Ciudad Blanca)"
+                                } else freq.origin
+                                val displayDest = if (freq.destination.isBlank() || freq.destination.contains("RUTA", ignoreCase = true) || freq.destination.equals("VUELTA", ignoreCase = true)) {
+                                    matchedRoute?.destination ?: "Centro Histórico (Cercado)"
+                                } else freq.destination
+
                                 Text(
-                                    text = freq.name,
+                                    text = if (freq.name.isBlank() || freq.name.equals("RUTA 2(M)", ignoreCase = true) || freq.name.equals("RUTA 2", ignoreCase = true) || freq.name.equals("RUTA A", ignoreCase = true)) {
+                                        matchedRoute?.name ?: "${freq.name}: $displayOrigin → $displayDest"
+                                    } else {
+                                        freq.name
+                                    },
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 15.sp,
                                     color = Color(0xFF1E293B),
@@ -733,7 +744,7 @@ fun HomeScreen(
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = "${freq.origin} → ${freq.destination}",
+                                    text = "$displayOrigin → $displayDest",
                                     fontSize = 12.sp,
                                     color = Color(0xFF64748B),
                                     maxLines = 1,

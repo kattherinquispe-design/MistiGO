@@ -86,6 +86,18 @@ class TripHistoryRepository private constructor(context: Context) {
         prefs.edit().putString(KEY_HISTORY, array.toString()).apply()
     }
 
+    private fun sanitizeSector(value: String, fallback: String): String {
+        val clean = value.trim()
+        val lower = clean.lowercase()
+        if (lower.isBlank() || lower == "ida" || lower == "vuelta" || lower == "retorno" ||
+            lower == "terminal origen" || lower == "terminal destino" ||
+            lower.startsWith("ruta")
+        ) {
+            return fallback
+        }
+        return clean
+    }
+
     private fun loadFromPrefs(): List<FrequentRoute> {
         val raw = prefs.getString(KEY_HISTORY, null) ?: return emptyList()
         val list = mutableListOf<FrequentRoute>()
@@ -93,13 +105,27 @@ class TripHistoryRepository private constructor(context: Context) {
             val array = JSONArray(raw)
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
+                val rawCode = obj.optString("code", "")
+                val rawName = obj.optString("name", "")
+                val rawOrigin = obj.optString("origin", "")
+                val rawDest = obj.optString("destination", "")
+
+                val origin = sanitizeSector(rawOrigin, "Paucarpata (Ciudad Blanca)")
+                val destination = sanitizeSector(rawDest, "Centro Histórico (Cercado)")
+                val name = if (rawName.isBlank() || rawName.equals("RUTA 2(M)", true) || rawName.equals("RUTA 2", true) || rawName.equals("RUTA A", true)) {
+                    val base = if (rawName.isNotBlank()) rawName else rawCode.ifBlank { "Ruta Urbana" }
+                    "$base: $origin → $destination"
+                } else {
+                    rawName
+                }
+
                 list.add(
                     FrequentRoute(
                         routeId = obj.getInt("routeId"),
-                        code = obj.getString("code"),
-                        name = obj.getString("name"),
-                        origin = obj.getString("origin"),
-                        destination = obj.getString("destination"),
+                        code = rawCode,
+                        name = name,
+                        origin = origin,
+                        destination = destination,
                         tripCount = obj.getInt("tripCount"),
                         lastTakenAt = obj.getLong("lastTakenAt")
                     )

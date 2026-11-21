@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.ejemplo.smartbus.data.RedeemedReward
 import com.ejemplo.smartbus.data.model.Reward
 import com.ejemplo.smartbus.ui.components.QrCodeGenerator
@@ -231,8 +233,15 @@ fun RewardsScreen(
                                     .background(Color(0xFFE2E8F0))
                             ) {
                                 if (reward.imageUrl.isNotBlank()) {
+                                    val context = LocalContext.current
+                                    val imageRequest = remember(reward.imageUrl) {
+                                        ImageRequest.Builder(context)
+                                            .data(reward.imageUrl)
+                                            .crossfade(true)
+                                            .build()
+                                    }
                                     AsyncImage(
-                                        model = reward.imageUrl,
+                                        model = imageRequest,
                                         contentDescription = reward.name,
                                         modifier = Modifier.fillMaxSize(),
                                         contentScale = ContentScale.Crop

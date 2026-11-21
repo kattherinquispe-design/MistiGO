@@ -227,7 +227,7 @@ class RoomTransitRepository(
         } catch (_: Exception) {
         }
 
-        if (stopDao.count() > 0 && routeDao.count() > 0) {
+        if (stopDao.count() >= BusStopRepository.stops.size && routeDao.count() >= RouteRepository.routes.size) {
             return
         }
 

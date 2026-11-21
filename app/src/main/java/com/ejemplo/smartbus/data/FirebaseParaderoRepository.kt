@@ -60,7 +60,9 @@ object FirebaseParaderoRepository {
                         val lat = doc.getDouble("latitud") ?: doc.getDouble("latitude") ?: 0.0
                         val lon = doc.getDouble("longitud") ?: doc.getDouble("longitude") ?: 0.0
                         val radio = doc.getDouble("radioMetros")?.toFloat() ?: 50f
-                        if (lat == 0.0 && lon == 0.0) return@mapNotNull null
+                        if ((lat == 0.0 && lon == 0.0) || !FirebaseRouteRepository.isPointInArequipa(lat, lon)) {
+                            return@mapNotNull null
+                        }
 
                         BusStop(
                             id = abs(doc.id.hashCode()),
