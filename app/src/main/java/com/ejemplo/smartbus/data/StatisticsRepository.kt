@@ -15,20 +15,18 @@ class StatisticsRepository(
         val history =
             pointsRepository.getHistory()
 
+        // Solo contar transacciones que explícitamente sean abordajes validados
         val historyBoardings =
             history.count {
-                it.points > 0 || it.reason.contains("Abordaje", ignoreCase = true)
+                it.reason.contains("Abordaje", ignoreCase = true)
             }
 
-        val recordedTrips =
-            pointsRepository.getRecordedRouteTripsCount()
+        val boardingCount = historyBoardings
 
-        val boardingCount =
-            maxOf(historyBoardings, recordedTrips)
-
+        // Solo contar canjes reales (puntos negativos CON razón de canje)
         val historyRedeems =
             history.count {
-                it.points < 0 || it.reason.contains("Canje", ignoreCase = true)
+                it.points < 0 && it.reason.contains("Canje", ignoreCase = true)
             }
 
         val savedRedeemedCount =
@@ -40,7 +38,7 @@ class StatisticsRepository(
         val historyStopKeys =
             history
                 .filter {
-                    it.points > 0 || it.reason.contains("Abordaje", ignoreCase = true)
+                    it.reason.contains("Abordaje", ignoreCase = true)
                 }
                 .mapNotNull { tx ->
                     when {
@@ -57,15 +55,7 @@ class StatisticsRepository(
         val combinedStopsCount =
             (historyStopKeys + visitedStopKeys).size
 
-        val distinctRoutesUsed =
-            pointsRepository.getRecordedDistinctRoutesCount()
-
-        val stopsUsed =
-            maxOf(
-                combinedStopsCount,
-                distinctRoutesUsed,
-                if (boardingCount > 0) 1 else 0
-            )
+        val stopsUsed = combinedStopsCount
 
         return SmartBusStatistics(
             boardingCount = boardingCount,
